@@ -14,6 +14,30 @@ import torch as th
 from .nn import mean_flat
 from .losses import normal_kl, discretized_gaussian_log_likelihood
 
+from spectrum import get_spectrum
+from torch import Tensor
+
+
+
+
+class MSESpectrumLoss(th.nn.MSELoss):
+    def __init__(self, *args, **kwargs):
+        super(MSESpectrumLoss, self).__init__(*args, **kwargs)
+
+    @staticmethod
+    def get_log_spectrum(input):
+        spectra = get_spectrum(input.flatten(0, 1)).unflatten(0, input.shape[:2])
+        spectra = spectra.mean(dim=1)             # average over channels
+        return (1 + spectra).log()
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        input_spectrum = self.get_log_spectrum(input)
+        target_spectrum = self.get_log_spectrum(target)
+        return super(MSESpectrumLoss, self).forward(input_spectrum, target_spectrum)
+    
+spectmse = MSESpectrumLoss(reduction='mean')
+
+
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
     """
@@ -741,7 +765,7 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
+    def training_losses(self, model, x_start, t,  model_kwargs=None, noise=None):
         """
         Compute training losses for a single timestep.
 
