@@ -39,7 +39,9 @@ class TrainLoop:
         weight_decay=0.0,
         lr_anneal_steps=0,
         maxf = 100,
-        sampler_type = 'reweighted_uniform'
+        sampler_type = 'reweighted_uniform',
+        spect_steps = 5,
+        mode = 'direct'
     ):
         self.model = model
         self.diffusion = diffusion
@@ -60,6 +62,8 @@ class TrainLoop:
         self.maxf = maxf
         self.sampler_type = sampler_type # 'uniform' or 'reweighted_uniform'
         self.schedule_sampler = schedule_sampler or ReweightedUniformSampler(diffusion,maxf=self.maxf)
+        self.spect_steps = spect_steps
+        self.mode = mode
         self.weight_decay = weight_decay
         self.lr_anneal_steps = lr_anneal_steps
 
