@@ -842,7 +842,7 @@ class GaussianDiffusion:
             if steps  == 0 :
                 for i in range(len(t)):
                     if indcs[i] == 0:
-                        if t[i].item() !=0:(
+                        if t[i].item() !=0:
                             terms["loss"] += spectmse( self.p_sample( model, x_t[i].unsqueeze(0).to(x_t.device), t[i].unsqueeze(0).to(t.device), model_kwargs=model_kwargs)["sample"],self.q_sample(x_start[i].unsqueeze(0).to(x_start.device), t[i].unsqueeze(0).to(t.device)- th.ones_like(t[i]).unsqueeze(0).long().to(t.device), noise=noise[i].unsqueeze(0)))
             else:
                 for i in range(len(t)):
