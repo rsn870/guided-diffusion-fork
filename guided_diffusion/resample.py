@@ -5,7 +5,7 @@ import torch as th
 import torch.distributed as dist
 
 
-def create_named_schedule_sampler(name, diffusion):
+def create_named_schedule_sampler(name, diffusion,maxf=100):
     """
     Create a ScheduleSampler from a library of pre-defined samplers.
 
@@ -17,7 +17,7 @@ def create_named_schedule_sampler(name, diffusion):
     elif name == "loss-second-moment":
         return LossSecondMomentResampler(diffusion)
     elif name == "reweighted-uniform":
-        return ReweightedUniformSampler(diffusion)
+        return ReweightedUniformSampler(diffusion,maxf=maxf)
     else:
         raise NotImplementedError(f"unknown schedule sampler: {name}")
 
@@ -76,10 +76,35 @@ class ReweightedUniformSampler(ScheduleSampler):
         self.maxf = maxf
 
     def weights(self):
-        for i in range(maxf):
+        for i in range(self.maxf):
             self._weights = self._weights[i]*((self.nt-self.maxf)//self.maxf)
        
         return self._weights
+    def sample(self,batch_size,device):
+        """
+        Importance-sample timesteps for a batch.
+
+        :param batch_size: the number of timesteps.
+        :param device: the torch device to save to.
+        :return: a tuple (timesteps, weights):
+                 - timesteps: a tensor of timestep indices.
+                 - weights: a tensor of weights to scale the resulting losses.
+        """
+        w = self.weights()
+        p = w / np.sum(w)
+        indices_np = np.random.choice(len(p), size=(batch_size,), p=p)
+        indcs = np.ones([batch_size])
+        for i in range(batch_size):
+            if indices_np[i] < self.maxf:
+                indcs[i] = 0
+        
+        indices = th.from_numpy(indices_np).long().to(device)
+        weights_np = 1 / (len(p) * p[indices_np])
+        weights = th.from_numpy(weights_np).float().to(device)
+
+        return indices, weights,indcs
+
+
 
 
 
