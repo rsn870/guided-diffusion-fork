@@ -16,6 +16,8 @@ def create_named_schedule_sampler(name, diffusion):
         return UniformSampler(diffusion)
     elif name == "loss-second-moment":
         return LossSecondMomentResampler(diffusion)
+    elif name == "reweighted-uniform":
+        return ReweightedUniformSampler(diffusion)
     else:
         raise NotImplementedError(f"unknown schedule sampler: {name}")
 
@@ -65,6 +67,21 @@ class UniformSampler(ScheduleSampler):
 
     def weights(self):
         return self._weights
+    
+class ReweightedUniformSampler(ScheduleSampler):
+    def __init__(self, diffusion, maxf=100):
+        self.diffusion = diffusion
+        self._weights = np.ones([diffusion.num_timesteps])
+        self.nt = diffusion.num_timesteps
+        self.maxf = maxf
+
+    def weights(self):
+        for i in range(maxf):
+            self._weights = self._weights[i]*((self.nt-self.maxf)//self.maxf)
+       
+        return self._weights
+
+
 
 
 class LossAwareSampler(ScheduleSampler):
