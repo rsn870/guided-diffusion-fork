@@ -11,7 +11,7 @@ from torch.optim import AdamW
 from . import dist_util, logger
 from .fp16_util import MixedPrecisionTrainer
 from .nn import update_ema
-from .resample import LossAwareSampler, UniformSampler
+from .resample import LossAwareSampler, UniformSampler,ReweightedUniformSampler
 
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
@@ -38,6 +38,8 @@ class TrainLoop:
         schedule_sampler=None,
         weight_decay=0.0,
         lr_anneal_steps=0,
+        maxf = 100,
+        sampler_type = 'reweighted_uniform'
     ):
         self.model = model
         self.diffusion = diffusion
@@ -55,7 +57,9 @@ class TrainLoop:
         self.resume_checkpoint = resume_checkpoint
         self.use_fp16 = use_fp16
         self.fp16_scale_growth = fp16_scale_growth
-        self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
+        self.maxf = maxf
+        self.sampler_type = sampler_type # 'uniform' or 'reweighted_uniform'
+        self.schedule_sampler = schedule_sampler or ReweightedUniformSampler(diffusion,maxf=self.maxf)
         self.weight_decay = weight_decay
         self.lr_anneal_steps = lr_anneal_steps
 
@@ -186,32 +190,53 @@ class TrainLoop:
                 for k, v in cond.items()
             }
             last_batch = (i + self.microbatch) >= batch.shape[0]
-            t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
-
-            compute_losses = functools.partial(
+            if self.sampler_type == 'rewieghted_uniform':
+                t, weights,indcs = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
+                compute_losses = functools.partial(
                 self.diffusion.training_losses,
                 self.ddp_model,
                 micro,
                 t,
-                model_kwargs=micro_cond,
-            )
-
-            if last_batch or not self.use_ddp:
-                losses = compute_losses()
-            else:
-                with self.ddp_model.no_sync():
+                indcs,
+                self.spect_steps,
+                self.mode,
+                model_kwargs=micro_cond,)
+                if last_batch or not self.use_ddp:
                     losses = compute_losses()
+                else:
+                    with self.ddp_model.no_sync():
+                        losses = compute_losses()
+            
 
-            if isinstance(self.schedule_sampler, LossAwareSampler):
-                self.schedule_sampler.update_with_local_losses(
-                    t, losses["loss"].detach()
-                )
+            else:
+                t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
+                compute_losses = functools.partial(
+                self.diffusion.training_losses,
+                self.ddp_model,
+                micro,
+                t,
+                model_kwargs=micro_cond,)
+
+                if last_batch or not self.use_ddp:
+                    losses = compute_losses()
+                else:
+                    with self.ddp_model.no_sync():
+                        losses = compute_losses()
+
+                if isinstance(self.schedule_sampler, LossAwareSampler):
+                    self.schedule_sampler.update_with_local_losses(
+                    t, losses["loss"].detach())
 
             loss = (losses["loss"] * weights).mean()
             log_loss_dict(
                 self.diffusion, t, {k: v * weights for k, v in losses.items()}
             )
             self.mp_trainer.backward(loss)
+
+
+
+
+          
 
     def _update_ema(self):
         for rate, params in zip(self.ema_rate, self.ema_params):
